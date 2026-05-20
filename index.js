@@ -1,0 +1,100 @@
+/**
+ * @joewiz/semantic-release-expath
+ *
+ * semantic-release plugin that injects a new `<change>` entry into an EXPath
+ * package descriptor (typically `repo.xml.tmpl`) based on the Conventional
+ * Commits between the previous release tag and the current release.
+ *
+ * Lifecycle hooks:
+ *
+ *   verifyConditions(pluginConfig, context)
+ *     Confirms the configured descriptor file exists and contains a
+ *     `<changelog xmlns="http://exist-db.org/xquery/repo">` element. Fails
+ *     fast (before the release is computed) with an actionable error if not.
+ *
+ *   prepare(pluginConfig, context)
+ *     Reads conventional commits since `context.lastRelease.gitTag`, builds
+ *     a list of human-readable change items, and inserts a new `<change
+ *     version="X.Y.Z">` element with those items at the top of `<changelog>`.
+ *     Writes the descriptor back to disk. The mutation is in-memory on the
+ *     CI runner — pair with @semantic-release/github (REST-based release
+ *     creation) and DO NOT use @semantic-release/git, so the on-disk file
+ *     in master stays at its dev-placeholder state. See README for details.
+ *
+ * Config options (all optional):
+ *
+ *   tmplPath: string  (default: 'repo.xml.tmpl')
+ *     Path to the EXPath repo descriptor template, relative to cwd.
+ */
+
+import { existsSync } from 'fs'
+import { join } from 'path'
+import { buildChangeItems, insertChangeEntry } from './lib/changelog.js'
+
+const REPO_NS = 'http://exist-db.org/xquery/repo'
+
+function resolveTmplPath (pluginConfig, context) {
+  return join(context.cwd ?? process.cwd(), pluginConfig.tmplPath ?? 'repo.xml.tmpl')
+}
+
+async function readChangelogContainer (tmplPath) {
+  const { readFileSync } = await import('fs')
+  const { DOMParser } = await import('@xmldom/xmldom')
+  const tmpl = readFileSync(tmplPath, 'utf8')
+  const doc = new DOMParser().parseFromString(tmpl, 'text/xml')
+  return doc.getElementsByTagNameNS(REPO_NS, 'changelog').item(0)
+}
+
+export async function verifyConditions (pluginConfig, context) {
+  const { logger } = context
+  const tmplPath = resolveTmplPath(pluginConfig, context)
+
+  if (!existsSync(tmplPath)) {
+    throw new Error(
+      `[semantic-release-expath] Template not found: ${tmplPath}\n` +
+      `Set the \`tmplPath\` plugin option if your descriptor lives elsewhere.`
+    )
+  }
+
+  const changelog = await readChangelogContainer(tmplPath)
+  if (!changelog) {
+    throw new Error(
+      `[semantic-release-expath] No <changelog xmlns="${REPO_NS}"> element found in ${tmplPath}.\n` +
+      `Add an empty <changelog/> child inside <meta> to enable change-entry injection.`
+    )
+  }
+
+  logger.log(`[semantic-release-expath] verified ${tmplPath}`)
+}
+
+export async function prepare (pluginConfig, context) {
+  const { logger, lastRelease, nextRelease } = context
+  const tmplPath = resolveTmplPath(pluginConfig, context)
+
+  if (!lastRelease?.gitTag) {
+    logger.log(
+      '[semantic-release-expath] No previous release tag — skipping changelog injection. ' +
+      '(First-release entries should be curated manually in repo.xml.tmpl.)'
+    )
+    return
+  }
+
+  const items = await buildChangeItems({
+    prevTag: lastRelease.gitTag,
+    version: nextRelease.version,
+    cwd: context.cwd
+  })
+
+  if (items.length === 0) {
+    logger.log(`[semantic-release-expath] No notable commits since ${lastRelease.gitTag} — skipping.`)
+    return
+  }
+
+  insertChangeEntry({
+    tmplPath,
+    version: nextRelease.version,
+    items
+  })
+
+  logger.log(`[semantic-release-expath] inserted ${items.length} change item(s) for ${nextRelease.version} into ${tmplPath}`)
+}
