@@ -130,7 +130,7 @@ semantic-release itself is a Node tool and runs in Node. The plugin API is Node-
 | **v0.2 — community feedback** | Circulate to @line-o and other org devs. Iterate on the API surface (config options, lifecycle hooks, optional `expath-pkg.xml.tmpl` support). | ⏳ pending |
 | **v1.0 — publish to `@existdb`** | Transfer to the eXist-db org's npm scope. Adopt across bundled apps as part of the broader release-strategy rollout. | ⏳ pending |
 
-See the [eXist-db release-strategy proposal](https://github.com/eXist-db/...) for the broader context. This plugin corresponds to §5.3 of that proposal.
+This plugin corresponds to §5.3 of a broader release-strategy proposal currently being circulated for community comment among the eXist-db devs.
 
 ## Acknowledgements
 
